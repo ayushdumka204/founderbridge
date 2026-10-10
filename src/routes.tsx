@@ -29,6 +29,7 @@ function NotFound() {
   );
 }
 
+
 export const router = createHashRouter([
   { path: "/admin", Component: Admin },
   {
