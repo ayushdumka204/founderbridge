@@ -1,0 +1,1241 @@
+-- ============================================================
+-- FOUNDERBRIDGE — COMPLETE DATABASE SETUP
+-- PostgreSQL / Supabase
+--
+-- Instructions:
+--   1. Open your Supabase project → SQL Editor
+--   2. Paste this entire file and run
+--   3. Configure Storage buckets (see Section 25)
+--   4. Enable Auth providers in Supabase dashboard
+--
+-- Sections:
+--   1.  Extensions
+--   2.  Enum Types
+--   3.  Profiles
+--   4.  Student Profiles
+--   5.  Investor Profiles
+--   6.  Business Profiles
+--   7.  Startup Ideas
+--   8.  Startup Ratings
+--   9.  Posts
+--   10. Comments
+--   11. Likes
+--   12. Follows
+--   13. Subscriptions
+--   14. Saved Items
+--   15. Conversations
+--   16. Messages
+--   17. SaaS Requirements
+--   18. SaaS Feedback
+--   19. News Articles
+--   20. Admin Audit Log
+--   21. Indexes
+--   22. Functions & Triggers
+--   23. Views
+--   24. Row Level Security (RLS)
+--   25. Storage Bucket Policies (run after creating buckets)
+--   26. Seed Data
+-- ============================================================
+
+
+-- ============================================================
+-- 1. EXTENSIONS
+-- ============================================================
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";   -- trigram search
+CREATE EXTENSION IF NOT EXISTS "unaccent";  -- accent-insensitive search
+
+
+-- ============================================================
+-- 2. ENUM TYPES
+-- ============================================================
+
+CREATE TYPE user_role AS ENUM (
+  'student',
+  'investor',
+  'business_owner',
+  'general_user',
+  'admin'
+);
+
+CREATE TYPE startup_visibility AS ENUM (
+  'private',
+  'public',
+  'investors_only'
+);
+
+CREATE TYPE startup_stage AS ENUM (
+  'Idea',
+  'MVP',
+  'Pre-Seed',
+  'Seed',
+  'Series A',
+  'Growth'
+);
+
+CREATE TYPE post_type AS ENUM (
+  'investor_insight',
+  'startup_update',
+  'founder_update',
+  'business_requirement',
+  'investment_interest',
+  'tech_insight',
+  'general'
+);
+
+CREATE TYPE saas_status AS ENUM (
+  'draft',
+  'submitted',
+  'reviewing',
+  'in_progress',
+  'completed',
+  'closed'
+);
+
+CREATE TYPE news_status AS ENUM (
+  'draft',
+  'published',
+  'archived'
+);
+
+CREATE TYPE content_type AS ENUM (
+  'startup',
+  'post',
+  'news',
+  'investor_profile',
+  'founder_profile'
+);
+
+CREATE TYPE feedback_type AS ENUM (
+  'good',
+  'needs_improvement',
+  'feature_request',
+  'bug',
+  'general'
+);
+
+
+-- ============================================================
+-- 3. PROFILES
+-- ============================================================
+
+CREATE TABLE profiles (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id       UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  role          user_role NOT NULL DEFAULT 'general_user',
+  full_name     TEXT NOT NULL,
+  username      TEXT UNIQUE,
+  avatar_url    TEXT,
+  bio           TEXT,
+  location      TEXT,
+  website       TEXT,
+  linkedin_url  TEXT,
+  twitter_url   TEXT,
+  instagram_url TEXT,
+  followers_count  INTEGER NOT NULL DEFAULT 0,
+  following_count  INTEGER NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT username_length CHECK (char_length(username) >= 3),
+  CONSTRAINT unique_user_id UNIQUE (user_id)
+);
+
+-- Prevent users from self-assigning admin role
+CREATE OR REPLACE FUNCTION prevent_self_admin()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  -- Only allow admin assignment via service role (not anon/authenticated)
+  IF NEW.role = 'admin' AND OLD.role != 'admin' THEN
+    IF current_setting('request.jwt.claims', true)::jsonb ->> 'role' != 'service_role' THEN
+      RAISE EXCEPTION 'Cannot self-assign admin role';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER enforce_no_self_admin
+  BEFORE UPDATE ON profiles
+  FOR EACH ROW EXECUTE FUNCTION prevent_self_admin();
+
+
+-- ============================================================
+-- 4. STUDENT PROFILES
+-- ============================================================
+
+CREATE TABLE student_profiles (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  profile_id      UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  university      TEXT,
+  course          TEXT,
+  graduation_year TEXT,
+  skills          TEXT[],
+  interests       TEXT[],
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT unique_student_profile UNIQUE (profile_id)
+);
+
+
+-- ============================================================
+-- 5. INVESTOR PROFILES
+-- ============================================================
+
+CREATE TABLE investor_profiles (
+  id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  profile_id            UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  investor_type         TEXT,           -- 'Angel', 'VC', 'Corporate', etc.
+  investment_interests  TEXT[],
+  preferred_stages      TEXT[],
+  investment_range_min  TEXT,
+  investment_range_max  TEXT,
+  investment_philosophy TEXT,
+  portfolio_description TEXT,
+  verified              BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT unique_investor_profile UNIQUE (profile_id)
+);
+
+
+-- ============================================================
+-- 6. BUSINESS PROFILES
+-- ============================================================
+
+CREATE TABLE business_profiles (
+  id                   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  profile_id           UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  business_name        TEXT,
+  industry             TEXT,
+  business_size        TEXT,
+  business_description TEXT,
+  website              TEXT,
+  location             TEXT,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT unique_business_profile UNIQUE (profile_id)
+);
+
+
+-- ============================================================
+-- 7. STARTUP IDEAS
+-- ============================================================
+
+CREATE TABLE startup_ideas (
+  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  founder_id       UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  title            TEXT NOT NULL,
+  slug             TEXT UNIQUE NOT NULL,
+  short_pitch      TEXT NOT NULL,
+  description      TEXT,
+  problem          TEXT,
+  solution         TEXT,
+  target_market    TEXT,
+  business_model   TEXT,
+  industry         TEXT NOT NULL,
+  stage            startup_stage NOT NULL DEFAULT 'Idea',
+  funding_required TEXT,
+  traction         TEXT,
+  competition      TEXT,
+  website_url      TEXT,
+  pitch_deck_url   TEXT,
+  demo_url         TEXT,
+  cover_image_url  TEXT,
+  visibility       startup_visibility NOT NULL DEFAULT 'public',
+  avg_rating       NUMERIC(3,2) NOT NULL DEFAULT 0,
+  rating_count     INTEGER NOT NULL DEFAULT 0,
+  investor_interest_count INTEGER NOT NULL DEFAULT 0,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Auto-generate slug from title
+CREATE OR REPLACE FUNCTION generate_startup_slug()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+  base_slug TEXT;
+  final_slug TEXT;
+  counter   INTEGER := 0;
+BEGIN
+  base_slug := lower(regexp_replace(trim(NEW.title), '[^a-zA-Z0-9\s]', '', 'g'));
+  base_slug := regexp_replace(base_slug, '\s+', '-', 'g');
+  final_slug := base_slug;
+  WHILE EXISTS (SELECT 1 FROM startup_ideas WHERE slug = final_slug AND id != COALESCE(NEW.id, uuid_generate_v4())) LOOP
+    counter := counter + 1;
+    final_slug := base_slug || '-' || counter;
+  END LOOP;
+  NEW.slug := final_slug;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER auto_slug_startup
+  BEFORE INSERT ON startup_ideas
+  FOR EACH ROW
+  WHEN (NEW.slug IS NULL OR NEW.slug = '')
+  EXECUTE FUNCTION generate_startup_slug();
+
+
+-- ============================================================
+-- 8. STARTUP RATINGS
+-- ============================================================
+
+CREATE TABLE startup_ratings (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  startup_id  UUID NOT NULL REFERENCES startup_ideas(id) ON DELETE CASCADE,
+  investor_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  rating      INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  feedback    TEXT,
+  tags        TEXT[],   -- ['Strong Problem', 'Interesting Market', ...]
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT one_rating_per_investor UNIQUE (startup_id, investor_id)
+);
+
+-- Recalculate avg_rating on the startup after each insert/update/delete
+CREATE OR REPLACE FUNCTION update_startup_avg_rating()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE startup_ideas
+  SET
+    avg_rating   = COALESCE((SELECT AVG(rating) FROM startup_ratings WHERE startup_id = COALESCE(NEW.startup_id, OLD.startup_id)), 0),
+    rating_count = (SELECT COUNT(*) FROM startup_ratings WHERE startup_id = COALESCE(NEW.startup_id, OLD.startup_id))
+  WHERE id = COALESCE(NEW.startup_id, OLD.startup_id);
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER recalc_avg_rating
+  AFTER INSERT OR UPDATE OR DELETE ON startup_ratings
+  FOR EACH ROW EXECUTE FUNCTION update_startup_avg_rating();
+
+
+-- ============================================================
+-- 9. POSTS
+-- ============================================================
+
+CREATE TABLE posts (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  author_id       UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  post_type       post_type NOT NULL DEFAULT 'general',
+  content         TEXT NOT NULL,
+  image_url       TEXT,
+  startup_id      UUID REFERENCES startup_ideas(id) ON DELETE SET NULL,
+  business_id     UUID REFERENCES business_profiles(id) ON DELETE SET NULL,
+  tags            TEXT[],
+  likes_count     INTEGER NOT NULL DEFAULT 0,
+  comments_count  INTEGER NOT NULL DEFAULT 0,
+  saves_count     INTEGER NOT NULL DEFAULT 0,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+-- ============================================================
+-- 10. COMMENTS
+-- ============================================================
+
+CREATE TABLE comments (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id      UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  content_type content_type NOT NULL,
+  content_id   UUID NOT NULL,
+  body         TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Update posts.comments_count
+CREATE OR REPLACE FUNCTION update_comments_count()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' AND NEW.content_type = 'post' THEN
+    UPDATE posts SET comments_count = comments_count + 1 WHERE id = NEW.content_id;
+  ELSIF TG_OP = 'DELETE' AND OLD.content_type = 'post' THEN
+    UPDATE posts SET comments_count = GREATEST(comments_count - 1, 0) WHERE id = OLD.content_id;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER sync_comment_count
+  AFTER INSERT OR DELETE ON comments
+  FOR EACH ROW EXECUTE FUNCTION update_comments_count();
+
+
+-- ============================================================
+-- 11. LIKES
+-- ============================================================
+
+CREATE TABLE likes (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id      UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  content_type content_type NOT NULL,
+  content_id   UUID NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT one_like_per_user UNIQUE (user_id, content_type, content_id)
+);
+
+-- Sync likes_count on posts
+CREATE OR REPLACE FUNCTION update_likes_count()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' AND NEW.content_type = 'post' THEN
+    UPDATE posts SET likes_count = likes_count + 1 WHERE id = NEW.content_id;
+  ELSIF TG_OP = 'DELETE' AND OLD.content_type = 'post' THEN
+    UPDATE posts SET likes_count = GREATEST(likes_count - 1, 0) WHERE id = OLD.content_id;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER sync_likes_count
+  AFTER INSERT OR DELETE ON likes
+  FOR EACH ROW EXECUTE FUNCTION update_likes_count();
+
+
+-- ============================================================
+-- 12. FOLLOWS
+-- ============================================================
+
+CREATE TABLE follows (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  follower_id  UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  following_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT no_self_follow CHECK (follower_id != following_id),
+  CONSTRAINT unique_follow UNIQUE (follower_id, following_id)
+);
+
+-- Sync follower/following counts
+CREATE OR REPLACE FUNCTION update_follow_counts()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    UPDATE profiles SET following_count = following_count + 1 WHERE id = NEW.follower_id;
+    UPDATE profiles SET followers_count = followers_count + 1 WHERE id = NEW.following_id;
+    -- Update startup investor_interest_count when investor follows founder
+    UPDATE startup_ideas
+    SET investor_interest_count = investor_interest_count + 1
+    WHERE founder_id = NEW.following_id
+      AND EXISTS (SELECT 1 FROM investor_profiles ip JOIN profiles p ON p.id = ip.profile_id WHERE p.id = NEW.follower_id);
+  ELSIF TG_OP = 'DELETE' THEN
+    UPDATE profiles SET following_count = GREATEST(following_count - 1, 0) WHERE id = OLD.follower_id;
+    UPDATE profiles SET followers_count = GREATEST(followers_count - 1, 0) WHERE id = OLD.following_id;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER sync_follow_counts
+  AFTER INSERT OR DELETE ON follows
+  FOR EACH ROW EXECUTE FUNCTION update_follow_counts();
+
+
+-- ============================================================
+-- 13. SUBSCRIPTIONS
+-- ============================================================
+
+CREATE TABLE subscriptions (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  subscriber_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  creator_id    UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT no_self_subscribe CHECK (subscriber_id != creator_id),
+  CONSTRAINT unique_subscription UNIQUE (subscriber_id, creator_id)
+);
+
+
+-- ============================================================
+-- 14. SAVED ITEMS
+-- ============================================================
+
+CREATE TABLE saved_items (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id      UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  item_type    content_type NOT NULL,
+  item_id      UUID NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT unique_saved UNIQUE (user_id, item_type, item_id)
+);
+
+-- Sync saves_count on posts
+CREATE OR REPLACE FUNCTION update_saves_count()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' AND NEW.item_type = 'post' THEN
+    UPDATE posts SET saves_count = saves_count + 1 WHERE id = NEW.item_id;
+  ELSIF TG_OP = 'DELETE' AND OLD.item_type = 'post' THEN
+    UPDATE posts SET saves_count = GREATEST(saves_count - 1, 0) WHERE id = OLD.item_id;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER sync_saves_count
+  AFTER INSERT OR DELETE ON saved_items
+  FOR EACH ROW EXECUTE FUNCTION update_saves_count();
+
+
+-- ============================================================
+-- 15. CONVERSATIONS
+-- ============================================================
+
+CREATE TABLE conversations (
+  id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE conversation_members (
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id         UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_read_at    TIMESTAMPTZ,
+  PRIMARY KEY (conversation_id, user_id)
+);
+
+-- Helper: get or create a 1-to-1 conversation between two users
+CREATE OR REPLACE FUNCTION get_or_create_conversation(user_a UUID, user_b UUID)
+RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  conv_id UUID;
+BEGIN
+  -- Find existing direct conversation
+  SELECT cm1.conversation_id INTO conv_id
+  FROM conversation_members cm1
+  JOIN conversation_members cm2 ON cm1.conversation_id = cm2.conversation_id
+  WHERE cm1.user_id = user_a AND cm2.user_id = user_b
+  LIMIT 1;
+
+  IF conv_id IS NULL THEN
+    INSERT INTO conversations DEFAULT VALUES RETURNING id INTO conv_id;
+    INSERT INTO conversation_members (conversation_id, user_id) VALUES (conv_id, user_a), (conv_id, user_b);
+  END IF;
+
+  RETURN conv_id;
+END;
+$$;
+
+
+-- ============================================================
+-- 16. MESSAGES
+-- ============================================================
+
+CREATE TABLE messages (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  sender_id       UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  body            TEXT NOT NULL,
+  read_at         TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Touch conversation.updated_at on new message
+CREATE OR REPLACE FUNCTION touch_conversation()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE conversations SET updated_at = NOW() WHERE id = NEW.conversation_id;
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER on_new_message
+  AFTER INSERT ON messages
+  FOR EACH ROW EXECUTE FUNCTION touch_conversation();
+
+
+-- ============================================================
+-- 17. SAAS REQUIREMENTS
+-- ============================================================
+
+CREATE TABLE saas_requirements (
+  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id          UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  title            TEXT NOT NULL,
+  problem          TEXT,
+  current_process  TEXT,
+  pain_points      TEXT,
+  desired_solution TEXT,
+  budget           TEXT,
+  priority         TEXT DEFAULT 'medium',
+  status           saas_status NOT NULL DEFAULT 'draft',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+-- ============================================================
+-- 18. SAAS FEEDBACK
+-- ============================================================
+
+CREATE TABLE saas_feedback (
+  id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id        UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  requirement_id UUID NOT NULL REFERENCES saas_requirements(id) ON DELETE CASCADE,
+  feedback_type  feedback_type NOT NULL DEFAULT 'general',
+  message        TEXT,
+  rating         INTEGER CHECK (rating BETWEEN 1 AND 5),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+-- ============================================================
+-- 19. NEWS ARTICLES
+-- ============================================================
+
+CREATE TABLE news_articles (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title           TEXT NOT NULL,
+  slug            TEXT UNIQUE NOT NULL,
+  summary         TEXT,
+  content         TEXT,
+  cover_image_url TEXT,
+  category        TEXT NOT NULL DEFAULT 'General',
+  source_name     TEXT,
+  source_url      TEXT,
+  published_at    TIMESTAMPTZ,
+  status          news_status NOT NULL DEFAULT 'draft',
+  created_by      UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Auto-generate slug for news
+CREATE OR REPLACE FUNCTION generate_news_slug()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+  base_slug TEXT;
+  final_slug TEXT;
+  counter   INTEGER := 0;
+BEGIN
+  base_slug := lower(regexp_replace(trim(NEW.title), '[^a-zA-Z0-9\s]', '', 'g'));
+  base_slug := regexp_replace(base_slug, '\s+', '-', 'g');
+  final_slug := base_slug;
+  WHILE EXISTS (SELECT 1 FROM news_articles WHERE slug = final_slug AND id != COALESCE(NEW.id, uuid_generate_v4())) LOOP
+    counter := counter + 1;
+    final_slug := base_slug || '-' || counter;
+  END LOOP;
+  NEW.slug := final_slug;
+  IF NEW.status = 'published' AND NEW.published_at IS NULL THEN
+    NEW.published_at := NOW();
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER auto_slug_news
+  BEFORE INSERT ON news_articles
+  FOR EACH ROW
+  WHEN (NEW.slug IS NULL OR NEW.slug = '')
+  EXECUTE FUNCTION generate_news_slug();
+
+-- Set published_at on status change to published
+CREATE OR REPLACE FUNCTION set_published_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.status = 'published' AND OLD.status != 'published' AND NEW.published_at IS NULL THEN
+    NEW.published_at := NOW();
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER on_publish_news
+  BEFORE UPDATE ON news_articles
+  FOR EACH ROW EXECUTE FUNCTION set_published_at();
+
+
+-- ============================================================
+-- 20. ADMIN AUDIT LOG
+-- ============================================================
+
+CREATE TABLE admin_audit_log (
+  id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  admin_id   UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  action     TEXT NOT NULL,
+  table_name TEXT,
+  record_id  UUID,
+  details    JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+-- ============================================================
+-- 21. INDEXES
+-- ============================================================
+
+-- Profiles
+CREATE INDEX idx_profiles_user_id     ON profiles(user_id);
+CREATE INDEX idx_profiles_username    ON profiles(username);
+CREATE INDEX idx_profiles_role        ON profiles(role);
+CREATE INDEX idx_profiles_fullname_trgm ON profiles USING GIN (full_name gin_trgm_ops);
+
+-- Startup Ideas
+CREATE INDEX idx_startups_founder_id  ON startup_ideas(founder_id);
+CREATE INDEX idx_startups_industry    ON startup_ideas(industry);
+CREATE INDEX idx_startups_stage       ON startup_ideas(stage);
+CREATE INDEX idx_startups_visibility  ON startup_ideas(visibility);
+CREATE INDEX idx_startups_created_at  ON startup_ideas(created_at DESC);
+CREATE INDEX idx_startups_title_trgm  ON startup_ideas USING GIN (title gin_trgm_ops);
+CREATE INDEX idx_startups_pitch_trgm  ON startup_ideas USING GIN (short_pitch gin_trgm_ops);
+
+-- Posts
+CREATE INDEX idx_posts_author_id      ON posts(author_id);
+CREATE INDEX idx_posts_created_at     ON posts(created_at DESC);
+CREATE INDEX idx_posts_type           ON posts(post_type);
+
+-- Comments
+CREATE INDEX idx_comments_content     ON comments(content_type, content_id);
+CREATE INDEX idx_comments_user_id     ON comments(user_id);
+
+-- Likes
+CREATE INDEX idx_likes_content        ON likes(content_type, content_id);
+CREATE INDEX idx_likes_user_id        ON likes(user_id);
+
+-- Follows
+CREATE INDEX idx_follows_follower     ON follows(follower_id);
+CREATE INDEX idx_follows_following    ON follows(following_id);
+
+-- Subscriptions
+CREATE INDEX idx_subs_subscriber      ON subscriptions(subscriber_id);
+CREATE INDEX idx_subs_creator         ON subscriptions(creator_id);
+
+-- Saved Items
+CREATE INDEX idx_saved_user_id        ON saved_items(user_id);
+CREATE INDEX idx_saved_item           ON saved_items(item_type, item_id);
+
+-- Messages
+CREATE INDEX idx_messages_conv_id     ON messages(conversation_id, created_at);
+CREATE INDEX idx_messages_sender      ON messages(sender_id);
+
+-- News
+CREATE INDEX idx_news_status          ON news_articles(status);
+CREATE INDEX idx_news_published_at    ON news_articles(published_at DESC);
+CREATE INDEX idx_news_category        ON news_articles(category);
+CREATE INDEX idx_news_title_trgm      ON news_articles USING GIN (title gin_trgm_ops);
+
+
+-- ============================================================
+-- 22. UPDATED_AT TRIGGERS
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER set_updated_at_profiles         BEFORE UPDATE ON profiles             FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER set_updated_at_student          BEFORE UPDATE ON student_profiles     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER set_updated_at_investor         BEFORE UPDATE ON investor_profiles    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER set_updated_at_business         BEFORE UPDATE ON business_profiles    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER set_updated_at_startups         BEFORE UPDATE ON startup_ideas        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER set_updated_at_ratings          BEFORE UPDATE ON startup_ratings      FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER set_updated_at_posts            BEFORE UPDATE ON posts                FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER set_updated_at_comments         BEFORE UPDATE ON comments             FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER set_updated_at_saas_req         BEFORE UPDATE ON saas_requirements    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER set_updated_at_news             BEFORE UPDATE ON news_articles        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER set_updated_at_conversations    BEFORE UPDATE ON conversations        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
+-- ============================================================
+-- 23. VIEWS
+-- ============================================================
+
+-- Public startup cards view (joins profile info)
+CREATE OR REPLACE VIEW public_startups AS
+SELECT
+  s.id,
+  s.title,
+  s.slug,
+  s.short_pitch,
+  s.industry,
+  s.stage,
+  s.funding_required,
+  s.cover_image_url,
+  s.avg_rating,
+  s.rating_count,
+  s.investor_interest_count,
+  s.visibility,
+  s.created_at,
+  p.full_name   AS founder_name,
+  p.avatar_url  AS founder_avatar,
+  p.username    AS founder_username
+FROM startup_ideas s
+JOIN profiles p ON p.id = s.founder_id
+WHERE s.visibility = 'public';
+
+-- Published news view
+CREATE OR REPLACE VIEW published_news AS
+SELECT
+  n.id,
+  n.title,
+  n.slug,
+  n.summary,
+  n.cover_image_url,
+  n.category,
+  n.source_name,
+  n.source_url,
+  n.published_at,
+  p.full_name AS author_name
+FROM news_articles n
+LEFT JOIN profiles p ON p.id = n.created_by
+WHERE n.status = 'published'
+ORDER BY n.published_at DESC;
+
+-- Feed view: posts with author info
+CREATE OR REPLACE VIEW feed_posts AS
+SELECT
+  po.id,
+  po.post_type,
+  po.content,
+  po.image_url,
+  po.tags,
+  po.likes_count,
+  po.comments_count,
+  po.saves_count,
+  po.created_at,
+  po.startup_id,
+  p.id          AS author_id,
+  p.full_name   AS author_name,
+  p.avatar_url  AS author_avatar,
+  p.username    AS author_username,
+  p.role        AS author_role,
+  COALESCE(ip.verified, FALSE) AS author_verified
+FROM posts po
+JOIN profiles p ON p.id = po.author_id
+LEFT JOIN investor_profiles ip ON ip.profile_id = p.id
+ORDER BY po.created_at DESC;
+
+-- Admin stats view
+CREATE OR REPLACE VIEW admin_stats AS
+SELECT
+  (SELECT COUNT(*) FROM profiles WHERE role = 'student')        AS total_students,
+  (SELECT COUNT(*) FROM profiles WHERE role = 'investor')       AS total_investors,
+  (SELECT COUNT(*) FROM profiles WHERE role = 'business_owner') AS total_business_owners,
+  (SELECT COUNT(*) FROM profiles WHERE role = 'general_user')   AS total_general_users,
+  (SELECT COUNT(*) FROM profiles)                               AS total_users,
+  (SELECT COUNT(*) FROM startup_ideas WHERE visibility = 'public') AS public_startups,
+  (SELECT COUNT(*) FROM news_articles WHERE status = 'published')  AS published_news,
+  (SELECT COUNT(*) FROM news_articles WHERE status = 'draft')      AS draft_news,
+  (SELECT COUNT(*) FROM posts)                                      AS total_posts,
+  (SELECT COUNT(*) FROM messages)                                   AS total_messages;
+
+
+-- ============================================================
+-- 24. ROW LEVEL SECURITY (RLS)
+-- ============================================================
+
+-- Enable RLS on all tables
+ALTER TABLE profiles              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE student_profiles      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE investor_profiles     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE business_profiles     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE startup_ideas         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE startup_ratings       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE posts                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE comments              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE likes                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE follows               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscriptions         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE saved_items           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversations         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_members  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE saas_requirements     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE saas_feedback         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE news_articles         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_audit_log       ENABLE ROW LEVEL SECURITY;
+
+-- Helper: get own profile id
+CREATE OR REPLACE FUNCTION own_profile_id()
+RETURNS UUID LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT id FROM profiles WHERE user_id = auth.uid() LIMIT 1;
+$$;
+
+-- Helper: own role
+CREATE OR REPLACE FUNCTION own_role()
+RETURNS TEXT LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT role::TEXT FROM profiles WHERE user_id = auth.uid() LIMIT 1;
+$$;
+
+-- ── profiles ──
+CREATE POLICY "Anyone can read public profiles"
+  ON profiles FOR SELECT USING (TRUE);
+
+CREATE POLICY "Users can insert own profile"
+  ON profiles FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can update own profile"
+  ON profiles FOR UPDATE
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+-- ── student_profiles ──
+CREATE POLICY "Anyone can read student profiles"
+  ON student_profiles FOR SELECT USING (TRUE);
+
+CREATE POLICY "Students can manage own student profile"
+  ON student_profiles FOR ALL
+  USING (profile_id = own_profile_id())
+  WITH CHECK (profile_id = own_profile_id());
+
+-- ── investor_profiles ──
+CREATE POLICY "Anyone can read investor profiles"
+  ON investor_profiles FOR SELECT USING (TRUE);
+
+CREATE POLICY "Investors can manage own investor profile"
+  ON investor_profiles FOR ALL
+  USING (profile_id = own_profile_id())
+  WITH CHECK (profile_id = own_profile_id());
+
+-- ── business_profiles ──
+CREATE POLICY "Anyone can read business profiles"
+  ON business_profiles FOR SELECT USING (TRUE);
+
+CREATE POLICY "Business owners can manage own business profile"
+  ON business_profiles FOR ALL
+  USING (profile_id = own_profile_id())
+  WITH CHECK (profile_id = own_profile_id());
+
+-- ── startup_ideas ──
+CREATE POLICY "Public startups visible to everyone"
+  ON startup_ideas FOR SELECT
+  USING (visibility = 'public');
+
+CREATE POLICY "Investors can see investors_only startups"
+  ON startup_ideas FOR SELECT
+  USING (visibility = 'investors_only' AND own_role() = 'investor');
+
+CREATE POLICY "Founders can see own private startups"
+  ON startup_ideas FOR SELECT
+  USING (visibility = 'private' AND founder_id = own_profile_id());
+
+CREATE POLICY "Admins can see all startups"
+  ON startup_ideas FOR SELECT
+  USING (own_role() = 'admin');
+
+CREATE POLICY "Founders can create startups"
+  ON startup_ideas FOR INSERT
+  WITH CHECK (
+    founder_id = own_profile_id()
+    AND own_role() IN ('student', 'investor', 'general_user')
+  );
+
+CREATE POLICY "Founders can update own startups"
+  ON startup_ideas FOR UPDATE
+  USING (founder_id = own_profile_id())
+  WITH CHECK (founder_id = own_profile_id());
+
+CREATE POLICY "Founders can delete own startups"
+  ON startup_ideas FOR DELETE
+  USING (founder_id = own_profile_id());
+
+-- ── startup_ratings ──
+CREATE POLICY "Anyone can read ratings"
+  ON startup_ratings FOR SELECT USING (TRUE);
+
+CREATE POLICY "Investors can rate"
+  ON startup_ratings FOR INSERT
+  WITH CHECK (
+    investor_id = own_profile_id()
+    AND own_role() = 'investor'
+  );
+
+CREATE POLICY "Investors can update own rating"
+  ON startup_ratings FOR UPDATE
+  USING (investor_id = own_profile_id())
+  WITH CHECK (investor_id = own_profile_id());
+
+-- ── posts ──
+CREATE POLICY "Anyone can read posts"
+  ON posts FOR SELECT USING (TRUE);
+
+CREATE POLICY "Auth users can create posts"
+  ON posts FOR INSERT
+  WITH CHECK (author_id = own_profile_id() AND auth.uid() IS NOT NULL);
+
+CREATE POLICY "Authors can update own posts"
+  ON posts FOR UPDATE
+  USING (author_id = own_profile_id());
+
+CREATE POLICY "Authors can delete own posts"
+  ON posts FOR DELETE
+  USING (author_id = own_profile_id());
+
+-- ── comments ──
+CREATE POLICY "Anyone can read comments"
+  ON comments FOR SELECT USING (TRUE);
+
+CREATE POLICY "Auth users can comment"
+  ON comments FOR INSERT
+  WITH CHECK (user_id = own_profile_id() AND auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can update own comments"
+  ON comments FOR UPDATE
+  USING (user_id = own_profile_id());
+
+CREATE POLICY "Users can delete own comments"
+  ON comments FOR DELETE
+  USING (user_id = own_profile_id());
+
+-- ── likes ──
+CREATE POLICY "Anyone can read likes"
+  ON likes FOR SELECT USING (TRUE);
+
+CREATE POLICY "Auth users can like"
+  ON likes FOR INSERT
+  WITH CHECK (user_id = own_profile_id() AND auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can unlike own likes"
+  ON likes FOR DELETE
+  USING (user_id = own_profile_id());
+
+-- ── follows ──
+CREATE POLICY "Anyone can read follows"
+  ON follows FOR SELECT USING (TRUE);
+
+CREATE POLICY "Auth users can follow"
+  ON follows FOR INSERT
+  WITH CHECK (follower_id = own_profile_id() AND auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can unfollow"
+  ON follows FOR DELETE
+  USING (follower_id = own_profile_id());
+
+-- ── subscriptions ──
+CREATE POLICY "Anyone can read subscriptions"
+  ON subscriptions FOR SELECT USING (TRUE);
+
+CREATE POLICY "Auth users can subscribe"
+  ON subscriptions FOR INSERT
+  WITH CHECK (subscriber_id = own_profile_id() AND auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can unsubscribe"
+  ON subscriptions FOR DELETE
+  USING (subscriber_id = own_profile_id());
+
+-- ── saved_items ──
+CREATE POLICY "Users can read own saved items"
+  ON saved_items FOR SELECT
+  USING (user_id = own_profile_id());
+
+CREATE POLICY "Users can save items"
+  ON saved_items FOR INSERT
+  WITH CHECK (user_id = own_profile_id() AND auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can remove own saved items"
+  ON saved_items FOR DELETE
+  USING (user_id = own_profile_id());
+
+-- ── conversations ──
+CREATE POLICY "Conversation members can read conversations"
+  ON conversations FOR SELECT
+  USING (
+    id IN (SELECT conversation_id FROM conversation_members WHERE user_id = own_profile_id())
+  );
+
+-- ── conversation_members ──
+CREATE POLICY "Members can read conversation membership"
+  ON conversation_members FOR SELECT
+  USING (
+    conversation_id IN (SELECT conversation_id FROM conversation_members WHERE user_id = own_profile_id())
+  );
+
+-- ── messages ──
+CREATE POLICY "Members can read messages"
+  ON messages FOR SELECT
+  USING (
+    conversation_id IN (SELECT conversation_id FROM conversation_members WHERE user_id = own_profile_id())
+  );
+
+CREATE POLICY "Members can send messages"
+  ON messages FOR INSERT
+  WITH CHECK (
+    sender_id = own_profile_id()
+    AND conversation_id IN (SELECT conversation_id FROM conversation_members WHERE user_id = own_profile_id())
+  );
+
+-- ── saas_requirements ──
+CREATE POLICY "Users can read own requirements"
+  ON saas_requirements FOR SELECT
+  USING (user_id = own_profile_id());
+
+CREATE POLICY "Admins can read all requirements"
+  ON saas_requirements FOR SELECT
+  USING (own_role() = 'admin');
+
+CREATE POLICY "Users can create requirements"
+  ON saas_requirements FOR INSERT
+  WITH CHECK (user_id = own_profile_id() AND auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can update own requirements"
+  ON saas_requirements FOR UPDATE
+  USING (user_id = own_profile_id());
+
+CREATE POLICY "Users can delete own requirements"
+  ON saas_requirements FOR DELETE
+  USING (user_id = own_profile_id());
+
+-- ── saas_feedback ──
+CREATE POLICY "Users can read own feedback"
+  ON saas_feedback FOR SELECT
+  USING (user_id = own_profile_id());
+
+CREATE POLICY "Users can create feedback"
+  ON saas_feedback FOR INSERT
+  WITH CHECK (user_id = own_profile_id() AND auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can update own feedback"
+  ON saas_feedback FOR UPDATE
+  USING (user_id = own_profile_id());
+
+-- ── news_articles ──
+CREATE POLICY "Anyone can read published news"
+  ON news_articles FOR SELECT
+  USING (status = 'published');
+
+CREATE POLICY "Admins can read all news"
+  ON news_articles FOR SELECT
+  USING (own_role() = 'admin');
+
+CREATE POLICY "Admins can create news"
+  ON news_articles FOR INSERT
+  WITH CHECK (own_role() = 'admin');
+
+CREATE POLICY "Admins can update news"
+  ON news_articles FOR UPDATE
+  USING (own_role() = 'admin');
+
+CREATE POLICY "Admins can delete news"
+  ON news_articles FOR DELETE
+  USING (own_role() = 'admin');
+
+-- ── admin_audit_log ──
+CREATE POLICY "Admins can read audit log"
+  ON admin_audit_log FOR SELECT
+  USING (own_role() = 'admin');
+
+CREATE POLICY "Admins can write audit log"
+  ON admin_audit_log FOR INSERT
+  WITH CHECK (own_role() = 'admin');
+
+
+-- ============================================================
+-- 25. STORAGE BUCKET POLICIES
+-- (Run AFTER creating buckets in Supabase dashboard)
+--
+-- Buckets to create:
+--   avatars        (public)
+--   startup-images (public)
+--   news-images    (public)
+--   post-images    (public)
+--   documents      (private)
+-- ============================================================
+
+-- avatars: users can upload their own, anyone can read
+INSERT INTO storage.buckets (id, name, public) VALUES ('avatars', 'avatars', true) ON CONFLICT DO NOTHING;
+
+CREATE POLICY "Users can upload own avatar"
+  ON storage.objects FOR INSERT
+  WITH CHECK (bucket_id = 'avatars' AND auth.uid()::text = (storage.foldername(name))[1]);
+
+CREATE POLICY "Users can update own avatar"
+  ON storage.objects FOR UPDATE
+  USING (bucket_id = 'avatars' AND auth.uid()::text = (storage.foldername(name))[1]);
+
+CREATE POLICY "Anyone can view avatars"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'avatars');
+
+-- startup-images: founders can upload their own
+INSERT INTO storage.buckets (id, name, public) VALUES ('startup-images', 'startup-images', true) ON CONFLICT DO NOTHING;
+
+CREATE POLICY "Founders can upload startup images"
+  ON storage.objects FOR INSERT
+  WITH CHECK (bucket_id = 'startup-images' AND auth.uid()::text = (storage.foldername(name))[1]);
+
+CREATE POLICY "Anyone can view startup images"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'startup-images');
+
+-- news-images: admins only
+INSERT INTO storage.buckets (id, name, public) VALUES ('news-images', 'news-images', true) ON CONFLICT DO NOTHING;
+
+CREATE POLICY "Admins can manage news images"
+  ON storage.objects FOR ALL
+  USING (bucket_id = 'news-images' AND own_role() = 'admin')
+  WITH CHECK (bucket_id = 'news-images' AND own_role() = 'admin');
+
+CREATE POLICY "Anyone can view news images"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'news-images');
+
+-- post-images: authenticated users
+INSERT INTO storage.buckets (id, name, public) VALUES ('post-images', 'post-images', true) ON CONFLICT DO NOTHING;
+
+CREATE POLICY "Auth users can upload post images"
+  ON storage.objects FOR INSERT
+  WITH CHECK (bucket_id = 'post-images' AND auth.uid() IS NOT NULL);
+
+CREATE POLICY "Anyone can view post images"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'post-images');
+
+-- documents: private, owner only
+INSERT INTO storage.buckets (id, name, public) VALUES ('documents', 'documents', false) ON CONFLICT DO NOTHING;
+
+CREATE POLICY "Users can manage own documents"
+  ON storage.objects FOR ALL
+  USING (bucket_id = 'documents' AND auth.uid()::text = (storage.foldername(name))[1])
+  WITH CHECK (bucket_id = 'documents' AND auth.uid()::text = (storage.foldername(name))[1]);
+
+
+-- ============================================================
+-- 26. SEED DATA (Demo / Development)
+-- ============================================================
+
+-- NOTE: Seed data inserts demo records for local development.
+-- In production, leave this section out.
+-- Admin user must be created via Supabase Auth dashboard
+-- then their profile role set to 'admin' via service role key.
+
+-- Example: After creating admin user via Auth, run:
+-- UPDATE profiles SET role = 'admin' WHERE user_id = '<admin-auth-uuid>';
+-- (This must be done via Supabase dashboard or service role, NOT via the app UI)
+
+INSERT INTO news_articles (title, slug, summary, category, source_name, status, published_at)
+VALUES
+  (
+    'FounderBridge Connects 1,200+ Student Founders with Investors',
+    'founderbridge-connects-student-founders',
+    'The platform has seen explosive growth with over 1,200 startup ideas submitted in its first year.',
+    'Platform News',
+    'FounderBridge',
+    'published',
+    NOW() - INTERVAL '1 day'
+  ),
+  (
+    'EdTech Startups Attract Record Investment in 2026',
+    'edtech-startups-record-investment-2026',
+    'Educational technology companies received over $4.2 billion in funding this year, driven by post-pandemic demand.',
+    'EdTech',
+    'TechCrunch',
+    'published',
+    NOW() - INTERVAL '2 days'
+  ),
+  (
+    'West Africa Emerges as Next Big Startup Hub',
+    'west-africa-startup-hub-2026',
+    'Lagos, Nairobi and Accra are seeing a surge in early-stage tech investment from global VCs.',
+    'Ecosystem',
+    'Forbes Africa',
+    'published',
+    NOW() - INTERVAL '3 days'
+  )
+ON CONFLICT (slug) DO NOTHING;

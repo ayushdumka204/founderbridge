@@ -1,0 +1,143 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+@import 'tailwindcss';
+
+@theme inline {
+  --color-background: #F5F4F0;
+  --color-foreground: #0D1421;
+  --color-card: #FFFFFF;
+  --color-card-foreground: #0D1421;
+  --color-primary: #0D1421;
+  --color-primary-foreground: #FFFFFF;
+  --color-secondary: #EEECEA;
+  --color-secondary-foreground: #0D1421;
+  --color-muted: #E8E6E1;
+  --color-muted-foreground: #5A6070;
+  --color-accent: #2557D6;
+  --color-accent-foreground: #FFFFFF;
+  --color-border: #DDD9D2;
+  --color-ring: #2557D6;
+  --color-success: #16A34A;
+  --color-warning: #D97706;
+  --color-error: #DC2626;
+  --font-sans: 'DM Sans', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --radius: 6px;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; height: 100%; }
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: #F5F4F0;
+  color: #0D1421;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  height: 100%;
+}
+
+#root { height: 100%; }
+
+h1, h2, h3, h4, h5, h6 { font-family: 'DM Sans', sans-serif; }
+
+/* ───────────── Scrollbar ───────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #BFBAB2; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9A958D; }
+* { scrollbar-width: thin; scrollbar-color: #BFBAB2 transparent; }
+::selection { background: #2557D6; color: #FFFFFF; }
+
+/* ───────────── Entrance animations ───────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes floatY {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-7px); }
+}
+
+@keyframes revealLine {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+@keyframes dropdownIn {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);     }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-fade-in {
+  animation: fadeIn 0.5s ease both;
+}
+.animate-float {
+  animation: floatY 4s ease-in-out infinite;
+}
+
+/* Delay helpers */
+.delay-100 { animation-delay: 0.1s; }
+.delay-200 { animation-delay: 0.2s; }
+.delay-300 { animation-delay: 0.3s; }
+.delay-400 { animation-delay: 0.4s; }
+.delay-500 { animation-delay: 0.5s; }
+.delay-600 { animation-delay: 0.6s; }
+.delay-700 { animation-delay: 0.7s; }
+
+/* ───────────── Scroll reveal ───────────── */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.55s cubic-bezier(0.16,1,0.3,1), transform 0.55s cubic-bezier(0.16,1,0.3,1);
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ───────────── Card hover ───────────── */
+.card-hover {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.card-hover:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.09);
+}
+
+/* ───────────── Category color pills ───────────── */
+.cat-edtech   { background:#EEF2FF; color:#4338CA; }
+.cat-healthtech{ background:#F0FDF4; color:#15803D; }
+.cat-cleantech { background:#ECFDF5; color:#047857; }
+.cat-devtools  { background:#FFF7ED; color:#C2410C; }
+.cat-fintech   { background:#FFFBEB; color:#B45309; }
+.cat-logistics { background:#F0F9FF; color:#0369A1; }
+.cat-retailtech{ background:#FDF4FF; color:#7E22CE; }
+.cat-ai        { background:#EEF2FF; color:#4338CA; }
+.cat-saas      { background:#F0F9FF; color:#0369A1; }
+.cat-default   { background:#F3F4F6; color:#374151; }
+
+/* ───────────── Line clamp ───────────── */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
