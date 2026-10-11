@@ -77,7 +77,8 @@ export default function Contact() {
 
               <div className="space-y-3">
                 {[
-                  { label: "Email", value: "hello@founderbridge.io" },
+                  { label: "Email", value: "info@ayushstack.me" },
+                  { label: "Phone", value: "70884*****" },
                   { label: "Based in", value: "Nairobi · London · Austin" },
                   { label: "Response time", value: "Within 48 hours" },
                 ].map((c) => (
